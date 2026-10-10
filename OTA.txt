@@ -1,0 +1,125 @@
+ESP32 OTA (OVER-THE-AIR) UPDATE VIA GITHUB - TEST NOTES
+=========================================================
+
+GOAL
+----
+Update an ESP32 over the internet, with no USB cable, by placing a new
+firmware.bin on GitHub. Test used a blink sketch:
+  v1 = slow blink (1000 ms)   -> flashed by USB, once
+  v2 = fast blink (200 ms)    -> arrives over WiFi from GitHub
+
+Final aim: use the same method on an outdoor weather station in a
+different district. Always bench-test on a spare board first.
+
+
+FILES IN THIS REPO
+------------------
+  version.txt     Plain text, ONE number only (e.g. 2). Latest version.
+  firmware.bin    Compiled program for the latest version.
+  README.txt      This file.
+  ota_blink_v1/ota_blink_v1.ino   Slow blink, FW_VERSION = 1
+  ota_blink_v2/ota_blink_v2.ino   Fast blink, FW_VERSION = 2
+
+The two .ino files are only for reference. The ESP32 reads only
+version.txt and firmware.bin.
+
+
+HOW IT WORKS
+------------
+1. ESP32 connects to WiFi.
+2. It opens the version link and reads the number in version.txt.
+3. If that number is HIGHER than FW_VERSION inside its own code, it
+   downloads firmware.bin, writes it to flash and reboots.
+4. If the number is the same or lower, nothing happens.
+
+The ESP32 asks GitHub; GitHub never connects to the ESP32. That is why
+it works from any network without port forwarding.
+
+Links used (replace USERNAME with the GitHub username):
+  https://raw.githubusercontent.com/USERNAME/esp32-ota-test/main/version.txt
+  https://raw.githubusercontent.com/USERNAME/esp32-ota-test/main/firmware.bin
+
+
+WHAT WAS DONE (STEP BY STEP)
+----------------------------
+A. Created a GitHub account and a PUBLIC repo named esp32-ota-test.
+B. Added version.txt containing: 1
+C. Opened the version link in a browser; it showed 1 (link works).
+D. Arduino IDE settings:
+     Board: ESP32 Dev Module
+     Partition Scheme: Default 4MB with spiffs (must NOT be "No OTA")
+     Serial Monitor: 115200 baud
+E. Flashed v1 by USB. Serial Monitor showed:
+     Firmware v1, blink 1000 ms
+     WiFi connected
+     Check: HTTP 200, server=1, mine=1
+F. Changed the sketch to v2 (FW_VERSION = 2, BLINK_DELAY = 200).
+G. Sketch > Export Compiled Binary (NOT Upload).
+H. Sketch > Show Sketch Folder > build > board folder.
+   Took the file named yoursketch.ino.bin
+   (NOT the bootloader, partitions or merged files).
+   Renamed it to firmware.bin.
+I. Uploaded firmware.bin to GitHub (Add file > Upload files > Commit).
+J. THEN edited version.txt from 1 to 2 (pencil icon > Commit).
+K. ESP32 detected server=2, downloaded the file, rebooted and
+   printed: Firmware v2, blink 200 ms. LED blinked fast. SUCCESS.
+
+Note: the first check runs 30 s after boot (or at boot, as in these
+sketches). The download of about 1 MB can take 10-60 s with no
+Serial output. GitHub may also cache files for a few minutes.
+
+
+HOW TO DO EVERY FUTURE UPDATE (3 THINGS, IN THIS ORDER)
+-------------------------------------------------------
+1. In the sketch: raise FW_VERSION (e.g. 2 -> 3), make your changes,
+   then Sketch > Export Compiled Binary. Rename the .ino.bin file
+   to firmware.bin.
+2. On GitHub: upload firmware.bin (overwrites the old one).
+3. On GitHub: edit version.txt to the SAME number as FW_VERSION.
+
+Rules:
+- Upload firmware.bin BEFORE changing version.txt.
+- version.txt must exactly match FW_VERSION inside the uploaded .bin,
+  otherwise the ESP32 re-flashes in a loop.
+- Only go upward (2 -> 3 -> 4). To roll back, upload the old code
+  with a NEW higher number.
+- If only firmware.bin changes and version.txt does not, nothing happens.
+- Keep the file name firmware.bin (it is hardcoded in the sketch).
+- Every version MUST keep the WiFi + OTA code. If it is removed, the
+  board can no longer update remotely and needs USB again.
+- Never use RTF/Word for version.txt. Plain text only.
+
+
+TROUBLESHOOTING
+---------------
+  HTTP 404                 Wrong username/repo/branch, or repo is private.
+  HTTP -1 or negative      No internet or TLS problem; check router, 2.4 GHz.
+  server=0                 version.txt is not a plain number.
+  Still server=old number  GitHub cache; wait a few minutes.
+  Update failed, no space  Partition scheme has no OTA slots.
+  Boots in a loop          Merged .bin was uploaded instead of .ino.bin.
+  Nothing blinks           Board may not have an LED on pin 2; use Serial.
+
+
+SECURITY (READ BEFORE REAL USE)
+-------------------------------
+- The WiFi name/password and any links are stored INSIDE firmware.bin.
+  In a PUBLIC repo anyone can download it and read them. Use a test
+  network, and change the password afterwards. Never commit real
+  credentials in the .ino files.
+- setInsecure() skips certificate checking. Fine for a bench test only.
+  For an unattended outdoor device use setCACert() with NTP time sync
+  (or signed firmware).
+- Anyone who can edit this repo can change what the device runs.
+
+
+BEFORE USING ON THE OUTDOOR STATION
+-----------------------------------
+- Check for updates once a day at a quiet hour (e.g. 3 AM via NTP),
+  not every 30 s, and not during sensor/Google Script uploads.
+- Skip the update if WiFi signal or power is poor.
+- Keep the hardware watchdog on.
+- Keep WiFi, NTP and OTA code in every version.
+- Bench-test each release for a day before changing version.txt.
+- Keep credentials out of the public .bin (store them once by USB in
+  Preferences).
